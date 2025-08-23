@@ -8,21 +8,27 @@ ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 
 
 el__build() {
-    # We build outside the source dir here because Docker inside of github actions with
-    # file system mounting gets all weird. No problems locally either way, so, we do it like this
+    # Container build dirs
     mkdir -p "/elembuild/wasm/"
     pushd "/elembuild/wasm/"
+
+    # Minimal injection for external modules and C++ standard
+    local CXXFLAGS_EXTRA="-O3 -std=c++20"
+    if [[ -n "${EXTERNAL_MODULES}" ]]; then
+        CXXFLAGS_EXTRA+=" -DEXTERNAL_MODULES"
+    fi
+    if [[ -n "${EXTERNAL_INCLUDE}" ]]; then
+        CXXFLAGS_EXTRA+=" -I${EXTERNAL_INCLUDE}"
+    fi
 
     ELEM_BUILD_ASYNC="${ELEM_BUILD_ASYNC:-0}" emcmake cmake \
         -DCMAKE_BUILD_TYPE=Release \
         -DONLY_BUILD_WASM=ON \
-        -DCMAKE_CXX_FLAGS="-O3" \
+        -DCMAKE_CXX_FLAGS="${CXXFLAGS_EXTRA}" \
         /src
 
     emmake make
 
-    # Because we build out of the source dir, copy the resulting file back to the
-    # source dir so that it exists outside the container
     mkdir -p /src/build/out/
     cp /elembuild/wasm/wasm/elementary-wasm.js /src/build/out/elementary-wasm.js
 
@@ -59,12 +65,15 @@ el__main() {
 
         docker run \
           -v $(pwd):/src \
+          ${EXTERNAL_DIR:+-v ${EXTERNAL_DIR}:${EXTERNAL_DIR}} \
+          ${EXTERNAL_INCLUDE:+-v ${EXTERNAL_INCLUDE}:${EXTERNAL_INCLUDE}} \
           --env ELEM_BUILD_ASYNC="$ELEM_BUILD_ASYNC" \
+          --env EXTERNAL_MODULES="$EXTERNAL_MODULES" \
+          --env EXTERNAL_INCLUDE="$EXTERNAL_INCLUDE" \
           docker.io/emscripten/emsdk:3.1.52 \
           ./scripts/build-wasm.sh build
 
-        # Then we copy the resulting file over to the website directory where
-        # we need it
+        # Copy out the resulting file
         cp $ROOT_DIR/build/out/elementary-wasm.js $OUTPUT_FILENAME
     fi
 }

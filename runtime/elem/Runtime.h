@@ -269,12 +269,15 @@ namespace elem
                     }
                 }
 
-                // Clean up key mappings for the node being removed
-                std::erase_if(keyToNodeIdMap, [nodeId](const auto& pair) {
-                    return pair.second == nodeId;
-                });
-                
-                
+                // Clean up key mappings for the node being removed (C++17-compatible)
+                for (auto itKey = keyToNodeIdMap.begin(); itKey != keyToNodeIdMap.end(); ) {
+                    if (itKey->second == nodeId) {
+                        itKey = keyToNodeIdMap.erase(itKey);
+                    } else {
+                        ++itKey;
+                    }
+                }
+
                 it = nodeTable.erase(it);
             } else {
                 it++;

@@ -8,6 +8,13 @@
 #include "Metro.h"
 #include "SampleTime.h"
 
+// Optional private hook: when EXTERNAL_MODULES is defined, we include a header
+// from the host repo to register additional private nodes. We expect the host
+// build to make "native/nodes.h" available on the include path.
+#ifdef EXTERNAL_MODULES
+#include "native/nodes.h"
+#endif
+
 
 using namespace emscripten;
 
@@ -59,6 +66,13 @@ public:
         runtime->registerNodeType("time", [](elem::NodeId const id, double fs, int const bs) {
             return std::make_shared<elem::SampleTimeNode<double>>(id, fs, bs);
         });
+
+        // Allow the host repository to register additional private nodes when building
+        // with EXTERNAL_MODULES and a provided header implementing:
+        //   inline void registerExternalModules(elem::Runtime<double>&)
+#ifdef EXTERNAL_MODULES
+        registerExternalModules(*runtime);
+#endif
     }
 
     //==============================================================================

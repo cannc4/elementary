@@ -31,6 +31,28 @@ export function sample(
   return unpack(createNode("mc.sample", other, [resolve(gate)]), channels);
 }
 
+export function msample(
+  props: {
+    key?: string;
+    path: string;
+    channels: number;
+    mode?: string;
+    stopOffset?: number;
+    playbackRate?: number;
+  },
+  gate: ElemNode,
+  startOffsetSignal: ElemNode,
+): Array<NodeRepr_t> {
+  let { channels, ...other } = props;
+
+  invariant(
+    typeof channels === "number" && channels > 0,
+    "Must provide a positive number channels prop",
+  );
+
+  return unpack(createNode("mc.msample", other, [resolve(gate), resolve(startOffsetSignal)]), channels);
+}
+
 export function sampleseq(
   props: {
     key?: string;
