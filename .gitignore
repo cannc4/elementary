@@ -7,7 +7,7 @@ node_modules
 .cpcache
 .cache
 .DS_Store
-
+.wasm-build/
 *.swp
 
 js/**/lib/bs
