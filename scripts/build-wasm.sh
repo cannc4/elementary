@@ -3,26 +3,14 @@
 set -x
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$PWD/$(dirname "$0")"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 
 
 el__build() {
-    # Determine build context: Docker (default) or local emsdk (LOCAL_BUILD=1)
-    local IS_LOCAL="${LOCAL_BUILD:-}"
-    local BUILD_ROOT
-    local SRC_DIR
-
-    if [[ -n "$IS_LOCAL" ]]; then
-        BUILD_ROOT="$ROOT_DIR/.wasm-build"
-        SRC_DIR="$ROOT_DIR"
-    else
-        BUILD_ROOT="/elembuild"
-        SRC_DIR="/src"
-    fi
-
-    mkdir -p "$BUILD_ROOT/wasm/"
-    pushd "$BUILD_ROOT/wasm/"
+    # Container build dirs
+    mkdir -p "/elembuild/wasm/"
+    pushd "/elembuild/wasm/"
 
     # Minimal injection for external modules and C++ standard
     local CXXFLAGS_EXTRA="-O3 -std=c++20"
@@ -37,21 +25,12 @@ el__build() {
         -DCMAKE_BUILD_TYPE=Release \
         -DONLY_BUILD_WASM=ON \
         -DCMAKE_CXX_FLAGS="${CXXFLAGS_EXTRA}" \
-        "$SRC_DIR"
+        /src
 
-    # Parallel build with fallback processor count detection
-    local JOBS
-    JOBS=$(command -v getconf >/dev/null 2>&1 && getconf _NPROCESSORS_ONLN 2>/dev/null)
-    if [[ -z "$JOBS" ]]; then
-        JOBS=$(command -v sysctl >/dev/null 2>&1 && sysctl -n hw.ncpu 2>/dev/null)
-    fi
-    if [[ -z "$JOBS" ]]; then
-        JOBS=4
-    fi
-    emmake make -j"$JOBS"
+    emmake make
 
-    mkdir -p "$SRC_DIR/build/out/"
-    cp "$BUILD_ROOT/wasm/wasm/elementary-wasm.js" "$SRC_DIR/build/out/elementary-wasm.js"
+    mkdir -p /src/build/out/
+    cp /elembuild/wasm/wasm/elementary-wasm.js /src/build/out/elementary-wasm.js
 
     popd
 }
@@ -69,13 +48,11 @@ el__main() {
         # the build command from within an emscripten/emsdk docker container.
         local OUTPUT_FILENAME=""
         local ELEM_BUILD_ASYNC=0
-        local FORCE_LOCAL=0
 
-        while getopts alo: opt; do
+        while getopts ao: opt; do
             case $opt in
                 o)  OUTPUT_FILENAME="$OPTARG";;
                 a)  ELEM_BUILD_ASYNC=1;;
-                l)  FORCE_LOCAL=1;;
             esac
         done
 
@@ -86,25 +63,15 @@ el__main() {
             exit 1
         fi
 
-        if [[ "$FORCE_LOCAL" -eq 1 ]] || command -v emcmake >/dev/null 2>&1; then
-          # Build using local emsdk toolchain
-          LOCAL_BUILD=1 \
-          ELEM_BUILD_ASYNC="$ELEM_BUILD_ASYNC" \
-          EXTERNAL_MODULES="$EXTERNAL_MODULES" \
-          EXTERNAL_INCLUDE="$EXTERNAL_INCLUDE" \
-          "$ROOT_DIR/scripts/build-wasm.sh" build
-        else
-          # Fallback to Dockerized build
-          docker run \
-            -v $(pwd):/src \
-            ${EXTERNAL_DIR:+-v ${EXTERNAL_DIR}:${EXTERNAL_DIR}} \
-            ${EXTERNAL_INCLUDE:+-v ${EXTERNAL_INCLUDE}:${EXTERNAL_INCLUDE}} \
-            --env ELEM_BUILD_ASYNC="$ELEM_BUILD_ASYNC" \
-            --env EXTERNAL_MODULES="$EXTERNAL_MODULES" \
-            --env EXTERNAL_INCLUDE="$EXTERNAL_INCLUDE" \
-            docker.io/emscripten/emsdk:3.1.52 \
-            ./scripts/build-wasm.sh build
-        fi
+        docker run \
+          -v $(pwd):/src \
+          ${EXTERNAL_DIR:+-v ${EXTERNAL_DIR}:${EXTERNAL_DIR}} \
+          ${EXTERNAL_INCLUDE:+-v ${EXTERNAL_INCLUDE}:${EXTERNAL_INCLUDE}} \
+          --env ELEM_BUILD_ASYNC="$ELEM_BUILD_ASYNC" \
+          --env EXTERNAL_MODULES="$EXTERNAL_MODULES" \
+          --env EXTERNAL_INCLUDE="$EXTERNAL_INCLUDE" \
+          docker.io/emscripten/emsdk:3.1.52 \
+          ./scripts/build-wasm.sh build
 
         # Copy out the resulting file
         cp $ROOT_DIR/build/out/elementary-wasm.js $OUTPUT_FILENAME

@@ -40,9 +40,14 @@ export default class OfflineRenderer extends EventEmitter {
     this._blockSize = blockSize;
 
     try {
+      console.log('[elemaudio-offline] Module() call4 - waa');
       this._module = await Module();
+      console.log('[elemaudio-offline] Module() resolved');
+      // console.log('[elemaudio-offline] this._module', this._module);
       this._native = new this._module.ElementaryAudioProcessor(numInputChannels, numOutputChannels);
+      // console.log('[elemaudio-offline] this._native', this._native);
       this._native.prepare(sampleRate, blockSize);
+      // console.log('[elemaudio-offline] this._native.prepare() resolved');
     } catch (e) {
       if (e instanceof WebAssembly.RuntimeError) {
         throw new Error('Failed to load the Elementary WASM backend. Running Elementary within Node.js requires Node v18, or Node v16 with --experimental-wasm-eh enabled.');
