@@ -6,8 +6,9 @@ import {
 } from '@elemaudio/core';
 
 /* @ts-ignore */
-import WorkletProcessor from './raw/WorkletProcessor';
-import WasmModule from './raw/elementary-wasm';
+import WorkletProcessor from './raw/WorkletProcessor.js';
+/* @ts-ignore */
+import WasmModule from './raw/elementary-wasm.js';
 
 // Injected at build time
 const pkgVersion = process.env.PKG_VERSION;

@@ -28,7 +28,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "wasm": "./scripts/prebuild.sh",
+    "wasm": "node ./scripts/prebuild.js",
     "build": "tsup index.ts --format cjs,esm --dts",
     "snaps": "jest --updateSnapshot",
     "test": "jest"
@@ -46,6 +46,7 @@
   },
   "dependencies": {
     "@elemaudio/core": "^4.0.1",
-    "invariant": "^2.2.4"
+    "invariant": "^2.2.4",
+    "minimatch": "^10.0.3"
   }
 }
