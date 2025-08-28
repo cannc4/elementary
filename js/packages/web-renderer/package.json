@@ -34,7 +34,7 @@
     "LICENSE.md"
   ],
   "scripts": {
-    "wasm": "node ./scripts/prebuild.js",
+    "wasm": "./scripts/prebuild.sh",
     "build": "tsup index.ts --format cjs,esm --dts --env.PKG_VERSION $npm_package_version",
     "test": "vitest run test --config=./test/vite.config.js"
   },
@@ -47,7 +47,6 @@
   },
   "dependencies": {
     "@elemaudio/core": "^4.0.1",
-    "invariant": "^2.2.4",
-    "minimatch": "^10.0.3"
+    "invariant": "^2.2.4"
   }
 }

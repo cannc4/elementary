@@ -17,11 +17,6 @@ const LoadTextPlugin = {
 };
 
 export default defineConfig({
-  esbuildOptions(options) {
-    options.define = Object.assign({}, options.define, {
-      'process.env.PKG_VERSION': JSON.stringify(pkg.version),
-    });
-  },
   target: 'es2020',
   esbuildPlugins: [LoadTextPlugin],
 })

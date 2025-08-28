@@ -36,10 +36,9 @@
   "scripts": {
     "re:build": "rescript",
     "re:start": "rescript build -w",
-    "clean": "node -e \"require('fs').rmSync('./dist',{recursive:true,force:true});\"",
+    "clean": "rm -rf ./dist/",
     "prebuild": "npm run clean",
-    "postre:build": "node ./scripts/fix-gen-paths.js",
-    "build": "npm run re:build && npm run postre:build && tsup index.ts --format cjs,esm",
+    "build": "npm run re:build && tsup index.ts --format cjs,esm --dts",
     "test": "jest",
     "snaps": "jest --updateSnapshot"
   },
