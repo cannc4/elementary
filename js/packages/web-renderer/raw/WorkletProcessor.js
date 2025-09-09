@@ -155,6 +155,7 @@ class ElementaryAudioWorkletProcessor extends AudioWorkletProcessor {
   }
 
   process (inputs, outputs, parameters) {
+    const tStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
     if (inputs.length > 0) {
       let m = 0;
 
@@ -193,6 +194,40 @@ class ElementaryAudioWorkletProcessor extends AudioWorkletProcessor {
           }
         }
       }
+    }
+
+    // Post full-quantum CPU timing (input + process + output)
+    const tEnd = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const budgetMs = numSamples > 0 ? (numSamples / sampleRate) * 1000 : 0;
+    const elapsedMs = tEnd - tStart;
+
+    // Aggregate and report roughly once per second to minimize overhead
+    if (typeof this._cpuAgg !== 'object' || this._cpuAgg === null) {
+      this._cpuAgg = { lastReport: tEnd, sumElapsed: 0, sumBudget: 0, blocks: 0 };
+    }
+    const agg = this._cpuAgg;
+    agg.sumElapsed += elapsedMs;
+    agg.sumBudget += budgetMs;
+    agg.blocks += 1;
+
+    if ((tEnd - (agg.lastReport || 0)) >= 1000) {
+      const avgElapsed = agg.blocks > 0 ? (agg.sumElapsed / agg.blocks) : 0;
+      const avgBudget = agg.blocks > 0 ? (agg.sumBudget / agg.blocks) : 0;
+      const load = avgBudget > 0 ? (avgElapsed / avgBudget) : 0;
+      try {
+        this.port.postMessage(['cpu', {
+          elapsedMs: avgElapsed,
+          budgetMs: avgBudget,
+          load,
+          numSamples,
+          blocks: agg.blocks,
+        }]);
+      } catch (e) {
+      }
+      agg.sumElapsed = 0;
+      agg.sumBudget = 0;
+      agg.blocks = 0;
+      agg.lastReport = tEnd;
     }
 
     // Tells the browser to keep this node alive and continue calling process
