@@ -40,14 +40,46 @@ export default class OfflineRenderer extends EventEmitter {
     this._blockSize = blockSize;
 
     try {
-      console.log('[elemaudio-offline] Module() call4 - waa');
+      // Prevent Emscripten wrapper from hijacking console via global print/printErr.
+      // In browsers, global `print` is window.print, which requires a bound this.
+      // If the wrapper assigns console.log = print, later calls cause "Illegal invocation".
+      const savedPrint = (globalThis as any).print;
+      const savedPrintErr = (globalThis as any).printErr;
+      try {
+        (globalThis as any).print = undefined;
+        (globalThis as any).printErr = undefined;
+      } catch {}
+
       this._module = await Module();
+
+      // NEW: robust readiness wait for both async and sync builds
+      const mod: any = this._module;
+      if (mod?.ready?.then) {
+        await mod.ready;
+      } else if (!mod?.calledRun) {
+        await new Promise<void>((resolve, reject) => {
+          try {
+            mod.onAbort = reject;
+          } catch {}
+          try {
+            mod.onRuntimeInitialized = resolve;
+          } catch {}
+        });
+      }
+
+      // Restore globals to avoid impacting the host app
+      try {
+        if (typeof savedPrint !== "undefined") (globalThis as any).print = savedPrint;
+        else delete (globalThis as any).print;
+        if (typeof savedPrintErr !== "undefined") (globalThis as any).printErr = savedPrintErr;
+        else delete (globalThis as any).printErr;
+      } catch {}
+
       this._native = new this._module.ElementaryAudioProcessor(
         numInputChannels,
         numOutputChannels,
       );
       this._native.prepare(sampleRate, blockSize);
-      // console.log('[elemaudio-offline] this._native.prepare() resolved');
     } catch (e) {
       if (e instanceof WebAssembly.RuntimeError) {
         throw new Error(
