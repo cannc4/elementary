@@ -181,7 +181,7 @@ class ElementaryAudioWorkletProcessor extends AudioWorkletProcessor {
           packedValue |= payload.value[0] << 16;
           packedValue |= payload.value[1] << 8;
           packedValue |= payload.value[2];
-
+          console.log(`[WorkletProcessor] Pushing MIDI event:`, payload);
           return this.port.postMessage([
             "reply",
             {
@@ -190,6 +190,7 @@ class ElementaryAudioWorkletProcessor extends AudioWorkletProcessor {
             },
           ]);
         case "pushParamValueEvent":
+          console.log(`[WorkletProcessor] Pushing param value event:`, payload);
           return this.port.postMessage([
             "reply",
             {
