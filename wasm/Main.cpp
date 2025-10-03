@@ -99,7 +99,7 @@ public:
     val postMessageBatch (val payload)
     {
         auto v = emValToValue(payload);
-
+        NATIVE_LOG_INFO("wasm", "postMessageBatch: %s", v.toString().c_str());
         if (!v.isArray()) {
             return valueToEmVal(elem::js::Object {
                 {"success", false},
