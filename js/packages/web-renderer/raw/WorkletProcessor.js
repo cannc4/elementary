@@ -42,7 +42,18 @@ class ElementaryAudioWorkletProcessor extends AudioWorkletProcessor {
       0,
     );
 
-    this._module = Module();
+    this._module = Module({
+      print: (...args) => {
+        try {
+          this.port.postMessage(["nativeLog", { level: "info", message: args.join(" ") }]);
+        } catch (e) {}
+      },
+      printErr: (...args) => {
+        try {
+          this.port.postMessage(["nativeLog", { level: "error", message: args.join(" ") }]);
+        } catch (e) {}
+      },
+    });
     this._native = new this._module.ElementaryAudioProcessor(
       numInputChannels,
       numOutputChannels,

@@ -119,6 +119,14 @@ export default class WebRenderer extends EventEmitter {
           return;
         }
 
+        if (type === "nativeLog") {
+          try {
+            (this as any).emit("nativeLog", payload);
+          } catch (err) {
+          }
+          return;
+        }
+
         if (type === "reply") {
           const { requestId, result } = payload;
           const { resolve, reject } = this._promiseMap.get(requestId);
