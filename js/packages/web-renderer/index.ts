@@ -171,7 +171,7 @@ export default class WebRenderer extends EventEmitter {
 
   async render(...args) {
     const { result, ...stats } = await (this._renderer as any).renderWithOptions(
-      { rootFadeInMs: 0, rootFadeOutMs: 0 },
+      { rootFadeInMs: 20, rootFadeOutMs: 20 },
       ...args,
     );
 
