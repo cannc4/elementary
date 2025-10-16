@@ -2,6 +2,8 @@
 
 #include "../BlockEvents.h"
 #include "../GraphNode.h"
+#include "helpers/ControlRate.h"
+#include <cmath>
 
 namespace elem
 {
@@ -24,32 +26,69 @@ namespace elem
                 index.store(static_cast<size_t>((elem::js::Number) val));
             }
 
+            if (key == "krDiv") {
+                if (!val.isNumber())
+                    return elem::ReturnCode::InvalidPropertyType();
+
+                auto div = static_cast<uint32_t>((elem::js::Number) val);
+                auto bs = static_cast<uint32_t>(elem::GraphNode<FloatType>::getBlockSize());
+                krDiv.store(std::max(uint32_t(1), std::min(div, bs)));
+            }
+
+            if (key == "krHz") {
+                if (!val.isNumber())
+                    return elem::ReturnCode::InvalidPropertyType();
+
+                auto hz = static_cast<float>((elem::js::Number) val);
+                if (hz > 0.0f) {
+                    auto sr = static_cast<float>(elem::GraphNode<FloatType>::getSampleRate());
+                    auto div = static_cast<uint32_t>(std::round(sr / hz));
+                    auto bs = static_cast<uint32_t>(elem::GraphNode<FloatType>::getBlockSize());
+                    krDiv.store(std::max(uint32_t(1), std::min(div, bs)));
+                }
+            }
+
             return elem::GraphNode<FloatType>::setProperty(key, val);
         }
 
         void process (elem::BlockContext<FloatType> const& ctx) override {
             auto const i = index.load();
+            auto const kDiv = krDiv.load();
 
-            size_t framesProcessed = 0;
+            if (kDiv <= 1) {
+                size_t framesProcessed = 0;
 
-            // Process parameter value events from the input events
-            ctx.inputEvents.template processEventsOfType<ParamValueEvent>(
-                [this, &i, &framesProcessed, &ctx](size_t time, ParamValueEvent const& evt) {
-                    if (evt.paramIndex == i) {
-                        auto framesRemaining = ctx.numSamples - framesProcessed;
-                        std::fill_n(ctx.outputData[0] + framesProcessed, framesRemaining, value);
+                ctx.inputEvents.template processEventsOfType<ParamValueEvent>(
+                    [this, &i, &framesProcessed, &ctx](size_t time, ParamValueEvent const& evt) {
+                        if (evt.paramIndex == i) {
+                            auto framesRemaining = ctx.numSamples - framesProcessed;
+                            std::fill_n(ctx.outputData[0] + framesProcessed, framesRemaining, value);
 
-                        value = evt.value;
-                        framesProcessed = time;
+                            value = evt.value;
+                            framesProcessed = time;
+                        }
                     }
-                }
-            );
+                );
 
-            auto framesRemaining = ctx.numSamples - framesProcessed;
-            std::fill_n(ctx.outputData[0] + framesProcessed, framesRemaining, value);
+                auto framesRemaining = ctx.numSamples - framesProcessed;
+                std::fill_n(ctx.outputData[0] + framesProcessed, framesRemaining, value);
+            } else {
+                kr::forEachStep(ctx.numSamples, kDiv, [this, &i, &ctx](size_t stepStart, size_t stepEnd) {
+                    ctx.inputEvents.template processEventsOfType<ParamValueEvent>(
+                        [this, &i, stepStart, stepEnd](size_t time, ParamValueEvent const& evt) {
+                            if (evt.paramIndex == i && time >= stepStart && time < stepEnd) {
+                                value = evt.value;
+                            }
+                        }
+                    );
+
+                    std::fill_n(ctx.outputData[0] + stepStart, stepEnd - stepStart, value);
+                });
+            }
         }
 
         std::atomic<size_t> index = 0;
+        std::atomic<uint32_t> krDiv = 1;
         FloatType value = 0;
     };
 
