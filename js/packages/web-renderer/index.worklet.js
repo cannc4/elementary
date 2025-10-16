@@ -1,3 +1,5 @@
+import Module from "./raw/elementary-wasm.js";
+
 const EventTypes = {
   CREATE_NODE: 0,
   APPEND_CHILD: 2,
@@ -42,25 +44,37 @@ class ElementaryAudioWorkletProcessor extends AudioWorkletProcessor {
       0,
     );
 
-    this._module = Module();
-    this._native = new this._module.ElementaryAudioProcessor(
-      numInputChannels,
-      numOutputChannels,
-    );
+    const { wasmBinary, virtualFileSystem, ...other } =
+      options.processorOptions;
 
-    // The `sampleRate` variable is a globally defined constant in the AudioWorkletGlobalScope.
-    // We also manually set a block size of 128 samples here, per the Web Audio API spec.
-    //
-    // See: https://webaudio.github.io/web-audio-api/#rendering-loop
-    this._native.prepare(sampleRate, 128);
+    if (!(wasmBinary instanceof ArrayBuffer)) {
+      throw new Error("Invalid wasm binary");
+    }
 
-    const hasProcOpts =
-      options.hasOwnProperty("processorOptions") &&
-      typeof options.processorOptions === "object" &&
-      options.processorOptions !== null;
+    Module({
+      instantiateWasm: async function (imports, receiveInstance) {
+        try {
+          let { instance, module } = await WebAssembly.instantiate(
+            wasmBinary,
+            imports,
+          );
+          receiveInstance(instance, module);
+        } catch (e) {
+          console.error("Failed to load wasm:", e);
+        }
+      },
+    }).then((module) => {
+      this._module = module;
+      this._native = new this._module.ElementaryAudioProcessor(
+        numInputChannels,
+        numOutputChannels,
+      );
 
-    if (hasProcOpts) {
-      const { virtualFileSystem, ...other } = options.processorOptions;
+      // The `sampleRate` variable is a globally defined constant in the AudioWorkletGlobalScope.
+      // We also manually set a block size of 128 samples here, per the Web Audio API spec.
+      //
+      // See: https://webaudio.github.io/web-audio-api/#rendering-loop
+      this._native.prepare(sampleRate, 128);
 
       const validVFS =
         typeof virtualFileSystem === "object" &&
@@ -76,7 +90,17 @@ class ElementaryAudioWorkletProcessor extends AudioWorkletProcessor {
           }
         }
       }
-    }
+
+      this.port.postMessage([
+        "load",
+        {
+          sampleRate,
+          blockSize: 128,
+          numInputChannels,
+          numOutputChannels,
+        },
+      ]);
+    });
 
     this.port.onmessage = (e) => {
       let { requestId, requestType, payload } = e.data;
@@ -205,19 +229,13 @@ class ElementaryAudioWorkletProcessor extends AudioWorkletProcessor {
           break;
       }
     };
-
-    this.port.postMessage([
-      "load",
-      {
-        sampleRate,
-        blockSize: 128,
-        numInputChannels,
-        numOutputChannels,
-      },
-    ]);
   }
 
   process(inputs, outputs, parameters) {
+    if (!this._native) {
+      return true;
+    }
+
     if (inputs.length > 0) {
       let m = 0;
 
@@ -262,7 +280,8 @@ class ElementaryAudioWorkletProcessor extends AudioWorkletProcessor {
   }
 }
 
+// This PKG_VERSION is injected at build time
 registerProcessor(
-  `ElementaryAudioWorkletProcessor@${__PKG_VERSION__}`,
+  `ElementaryAudioWorkletProcessor@${process.env.PKG_VERSION}`,
   ElementaryAudioWorkletProcessor,
 );
