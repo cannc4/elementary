@@ -251,7 +251,10 @@ class ElementaryAudioWorkletProcessor extends AudioWorkletProcessor {
     const numSamples =
       outputs.length > 0 && outputs[0].length > 0 ? outputs[0][0].length : 0;
 
+    const tDspStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
     this._native.process(numSamples);
+    const tDspEnd = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const dspElapsedMs = tDspEnd - tDspStart;
 
     if (outputs.length > 0) {
       let m = 0;
@@ -270,24 +273,61 @@ class ElementaryAudioWorkletProcessor extends AudioWorkletProcessor {
       }
     }
 
-    // Post full-quantum CPU timing (input + process + output)
     const tEnd = (typeof performance !== 'undefined' ? performance.now() : Date.now());
     const budgetMs = numSamples > 0 ? (numSamples / sampleRate) * 1000 : 0;
     const elapsedMs = tEnd - tStart;
 
-    // Aggregate and report roughly once per second to minimize overhead
     if (typeof this._cpuAgg !== 'object' || this._cpuAgg === null) {
-      this._cpuAgg = { lastReport: tEnd, sumElapsed: 0, sumBudget: 0, blocks: 0 };
+      this._cpuAgg = {
+        lastReport: tEnd,
+        lastPeakUpdate: tEnd,
+        sumElapsed: 0,
+        sumDspElapsed: 0,
+        sumBudget: 0,
+        blocks: 0,
+        peakWindow: [],
+        currentPeakLoad: 0
+      };
     }
     const agg = this._cpuAgg;
     agg.sumElapsed += elapsedMs;
+    agg.sumDspElapsed += dspElapsedMs;
     agg.sumBudget += budgetMs;
     agg.blocks += 1;
 
+    const instantDspLoad = budgetMs > 0 ? (dspElapsedMs / budgetMs) : 0;
+
+    if (instantDspLoad > agg.currentPeakLoad) {
+      agg.currentPeakLoad = instantDspLoad;
+    }
+
+    if ((tEnd - (agg.lastPeakUpdate || 0)) >= 20) {
+      const twoSecondsAgo = tEnd - 2000;
+      while (agg.peakWindow.length > 0 && agg.peakWindow[0].time < twoSecondsAgo) {
+        agg.peakWindow.shift();
+      }
+
+      agg.peakWindow.push({ load: agg.currentPeakLoad, time: tEnd });
+      agg.currentPeakLoad = 0;
+      agg.lastPeakUpdate = tEnd;
+    }
+
     if ((tEnd - (agg.lastReport || 0)) >= 1000) {
       const avgElapsed = agg.blocks > 0 ? (agg.sumElapsed / agg.blocks) : 0;
+      const avgDspElapsed = agg.blocks > 0 ? (agg.sumDspElapsed / agg.blocks) : 0;
       const avgBudget = agg.blocks > 0 ? (agg.sumBudget / agg.blocks) : 0;
       const load = avgBudget > 0 ? (avgElapsed / avgBudget) : 0;
+      const avgLoadPercent = load * 100;
+      const dspLoadPercent = avgBudget > 0 ? (avgDspElapsed / avgBudget) * 100 : 0;
+
+      let peakLoadPercent2s = 0;
+      for (let i = 0; i < agg.peakWindow.length; i++) {
+        if (agg.peakWindow[i].load > peakLoadPercent2s) {
+          peakLoadPercent2s = agg.peakWindow[i].load;
+        }
+      }
+      peakLoadPercent2s *= 100;
+
       try {
         this.port.postMessage(['cpu', {
           elapsedMs: avgElapsed,
@@ -295,16 +335,19 @@ class ElementaryAudioWorkletProcessor extends AudioWorkletProcessor {
           load,
           numSamples,
           blocks: agg.blocks,
+          avgLoadPercent,
+          dspLoadPercent,
+          peakLoadPercent2s
         }]);
       } catch (e) {
       }
       agg.sumElapsed = 0;
+      agg.sumDspElapsed = 0;
       agg.sumBudget = 0;
       agg.blocks = 0;
       agg.lastReport = tEnd;
     }
 
-    // Tells the browser to keep this node alive and continue calling process
     return true;
   }
 }
