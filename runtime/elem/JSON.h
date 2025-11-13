@@ -2,7 +2,7 @@
 
 #ifdef USE_YYJSON
 
-#include "../../yyjson/src/yyjson.h"
+#include "yyjson.h"
 #include "Value.h"
 #include <stdexcept>
 #include <string>
