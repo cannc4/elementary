@@ -102,6 +102,11 @@ namespace elem
         // Intentionally, this does not provide access to the values in the map.
         SharedResourceMap::KeyViewType getSharedResourceMapKeys();
 
+        // Returns a shared resource by name, or nullptr if not found.
+        // This allows retrieving the SharedResourcePtr after adding a resource,
+        // useful for pushing to parallel delivery channels for hot-swapping.
+        SharedResourcePtr getSharedResource(std::string const& name);
+
         //==============================================================================
         // For registering custom GraphNode factory functions.
         //
@@ -505,6 +510,12 @@ namespace elem
     SharedResourceMap::KeyViewType Runtime<FloatType>::getSharedResourceMapKeys()
     {
         return sharedResourceMap.keys();
+    }
+
+    template <typename FloatType>
+    SharedResourcePtr Runtime<FloatType>::getSharedResource(std::string const& name)
+    {
+        return sharedResourceMap.get(name);
     }
 
     template <typename FloatType>
