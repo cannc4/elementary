@@ -28,10 +28,15 @@ namespace elem {
         void setMap(MapType&& map) {
             auto next = std::make_shared<MapType>(std::move(map));
             std::atomic_store_explicit(&current, next, std::memory_order_release);
+            version_.fetch_add(1, std::memory_order_release);
         }
 
         std::shared_ptr<const MapType> snapshot() const {
             return std::atomic_load_explicit(&current, std::memory_order_acquire);
+        }
+
+        uint64_t version() const {
+            return version_.load(std::memory_order_acquire);
         }
 
         elem::js::Value get(std::string const& key) const {
@@ -43,6 +48,7 @@ namespace elem {
 
     private:
         std::shared_ptr<MapType> current;
+        std::atomic<uint64_t> version_{0};
     };
 
 } // namespace elem

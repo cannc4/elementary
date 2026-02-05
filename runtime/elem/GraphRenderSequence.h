@@ -96,89 +96,52 @@ namespace elem
 
         void push(std::shared_ptr<GraphNode<FloatType>>& node, std::vector<OutletConnection> const& outlets)
         {
-            // First we update our node and tap registry to make sure we can easily visit them
-            // for tap promotion and event propagation
             nodeList.push_back(node);
 
             if (auto tap = std::dynamic_pointer_cast<TapOutNode<FloatType>>(node)) {
                 tapList.push_back(tap);
             }
 
-            // Next we prepare the render operation
             auto outputChannels = m_bufferPool.produce(node->getId(), outlets);
             auto& outputEvents = m_eventsBufferPool.produce(node->getId(), outlets);
 
-            renderOps.push_back([node, &outputEvents, outputChannels = std::move(outputChannels)](BlockContext<FloatType> const& rootCtx) mutable {
-                outputEvents.clear();
-
-                node->process(BlockContext<FloatType> {
-                    rootCtx.inputData,
-                    rootCtx.numInputChannels,
-                    outputChannels.data(),
-                    outputChannels.size(),
-                    rootCtx.numSamples,
-                    rootCtx.userData,
-                    rootCtx.active,
-                    rootCtx.inputEvents,
-                    outputEvents,
-                });
+            renderOps.push_back(RenderOp {
+                node.get(),
+                std::move(outputChannels),
+                {},
+                &outputEvents,
+                {},
+                false
             });
         }
 
         void push(std::shared_ptr<GraphNode<FloatType>>& node, std::vector<InletConnection> const& inlets, std::vector<OutletConnection> const& outlets)
         {
-            // Check if we're dealing with a leaf node
             if (inlets.size() == 0) {
                 return push(node, outlets);
             }
 
-            // First we update our node and tap registry to make sure we can easily visit them
-            // for tap promotion and event propagation
             nodeList.push_back(node);
 
             if (auto tap = std::dynamic_pointer_cast<TapOutNode<FloatType>>(node)) {
                 tapList.push_back(tap);
             }
 
-            // Gives the node a chance to prepare anything that might dynamically depend on
-            // the number of input signals
             node->setProperty("_internal:numChildren", elem::js::Number(inlets.size()));
 
-            // Next we prepare the render operation
             auto outputChannels = m_bufferPool.produce(node->getId(), outlets);
             auto inputChannels = m_bufferPool.consume(inlets);
 
-            // Always produce before consume! Otherwise the pool might hand out the same buffer
-            // for input and output events, which would get cleared at the beginning of the op
-            // below.
             auto& outputEvents = m_eventsBufferPool.produce(node->getId(), outlets);
             auto inputEvents = m_eventsBufferPool.consume(inlets);
 
-            renderOps.push_back([node, &outputEvents, inputEvents = std::move(inputEvents), outputChannels = std::move(outputChannels), inputChannels = std::move(inputChannels)](BlockContext<FloatType> const& rootCtx) mutable {
-                BlockEvents aggregateInputEvents;
-                outputEvents.clear();
-
-                // Aggregate
-                for (auto& evts : inputEvents) {
-                    for (auto& e : evts->storage) {
-                        aggregateInputEvents.storage.push_back(e);
-                    }
-                }
-
-                // Sort
-                aggregateInputEvents.sort();
-
-                node->process(BlockContext<FloatType> {
-                    const_cast<const FloatType**>(inputChannels.data()),
-                    inputChannels.size(),
-                    outputChannels.data(),
-                    outputChannels.size(),
-                    rootCtx.numSamples,
-                    rootCtx.userData,
-                    rootCtx.active,
-                    aggregateInputEvents,
-                    outputEvents,
-                });
+            renderOps.push_back(RenderOp {
+                node.get(),
+                std::move(outputChannels),
+                std::move(inputChannels),
+                &outputEvents,
+                std::move(inputEvents),
+                true
             });
         }
 
@@ -230,17 +193,42 @@ namespace elem
 
             // Run the subsequence
             for (size_t i = 0; i < renderOps.size(); ++i) {
-                renderOps[i](BlockContext<FloatType> {
-                    hostCtx.inputData,
-                    hostCtx.numInputChannels,
-                    hostCtx.outputData,
-                    hostCtx.numOutputChannels,
-                    hostCtx.numSamples,
-                    hostCtx.userData,
-                    rootPtr->active(),
-                    hostCtx.inputEvents,
-                    hostCtx.outputEvents
-                });
+                auto& op = renderOps[i];
+                op.outputEvents->clear();
+
+                if (op.hasInlets) {
+                    aggregateEvents.storage.clear();
+                    for (auto& evts : op.inputEvents) {
+                        for (auto& e : evts->storage) {
+                            aggregateEvents.storage.push_back(e);
+                        }
+                    }
+                    aggregateEvents.sort();
+
+                    op.node->process(BlockContext<FloatType> {
+                        const_cast<const FloatType**>(op.inputChannels.data()),
+                        op.inputChannels.size(),
+                        op.outputChannels.data(),
+                        op.outputChannels.size(),
+                        hostCtx.numSamples,
+                        hostCtx.userData,
+                        rootPtr->active(),
+                        aggregateEvents,
+                        *op.outputEvents,
+                    });
+                } else {
+                    op.node->process(BlockContext<FloatType> {
+                        hostCtx.inputData,
+                        hostCtx.numInputChannels,
+                        op.outputChannels.data(),
+                        op.outputChannels.size(),
+                        hostCtx.numSamples,
+                        hostCtx.userData,
+                        rootPtr->active(),
+                        hostCtx.inputEvents,
+                        *op.outputEvents,
+                    });
+                }
             }
 
             // Sum into the output buffer
@@ -258,9 +246,17 @@ namespace elem
         FloatBufferPool<FloatType>& m_bufferPool;
         BlockEventsBufferPool& m_eventsBufferPool;
 
-        using RenderOperation = std::function<void(BlockContext<FloatType> const& context)>;
-        std::vector<RenderOperation> renderOps;
+        struct RenderOp {
+            GraphNode<FloatType>* node;
+            ChannelData<FloatType> outputChannels;
+            ChannelData<FloatType> inputChannels;
+            BlockEvents* outputEvents;
+            choc::SmallVector<choc::ObjectPointer<BlockEvents>, 16> inputEvents;
+            bool hasInlets;
+        };
+        std::vector<RenderOp> renderOps;
 
+        BlockEvents aggregateEvents;
         bool needsReset{true};
     };
 
