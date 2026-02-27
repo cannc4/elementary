@@ -407,6 +407,9 @@ namespace elem
         // Populate and activate from the incoming event
         std::set<NodeId> active;
 
+        // Collect new root pointers for fade gain transfer
+        std::vector<std::shared_ptr<RootNode<FloatType>>> newRoots;
+
         for (auto const& v : roots)
         {
             if (!v.isNumber())
@@ -430,14 +433,52 @@ namespace elem
             auto ptr = std::dynamic_pointer_cast<RootNode<FloatType>>(it->second.node);
             if (ptr)
             {
-                ptr->setProperty("active", true);
                 active.insert(nodeId);
+                newRoots.push_back(ptr);
                 ELEM_DBG("[Success] Activated root: " << nodeIdToHex(nodeId));
             }
             else
             {
                 ELEM_DBG("[Error] Failed to cast to RootNode or activate: " << nodeIdToHex(nodeId));
             }
+        }
+
+        // Transfer fade gain from old roots to new roots on the same channel.
+        // When keyed nodes (like the looper) are reused across renders, they only
+        // appear in the new root's render sequence (traverse visited-set prevents
+        // double-visit). Without transfer, the new root starts at gain 0 and fades
+        // in over 20ms, causing an audible dip on continuous audio like the looper.
+        // By inheriting the old root's current gain, the new root starts at full
+        // volume and shared keyed nodes experience no interruption.
+        for (auto& newPtr : newRoots)
+        {
+            int newChannel = newPtr->getChannelNumber();
+
+            for (auto const& oldN : currentRoots)
+            {
+                if (active.count(oldN) > 0)
+                    continue; // Already in new set, skip
+
+                auto oldIt = nodeTable.find(oldN);
+                if (oldIt == nodeTable.end())
+                    continue;
+
+                auto oldPtr = std::dynamic_pointer_cast<RootNode<FloatType>>(oldIt->second.node);
+                if (!oldPtr)
+                    continue;
+
+                if (oldPtr->getChannelNumber() == newChannel)
+                {
+                    // Transfer current gain from old root to new root so continuous
+                    // audio (looper, sustained voices) doesn't dip during crossfade
+                    newPtr->fade.setCurrentGain(oldPtr->fade.getCurrentGain());
+                    ELEM_DBG("[Native] Transferred fade gain from old root to new root on channel " << newChannel);
+                    break;
+                }
+            }
+
+            // Activate after potential gain transfer
+            newPtr->setProperty("active", true);
         }
 
         // Deactivate any prior roots not included in the incoming active set

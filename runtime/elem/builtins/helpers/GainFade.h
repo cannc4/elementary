@@ -95,6 +95,10 @@ namespace elem
             currentGain.store(gain);
         }
 
+        FloatType getCurrentGain() const {
+            return currentGain.load();
+        }
+
         bool on() {
             return (targetGain.load() > FloatType(0.5));
         }
