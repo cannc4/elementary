@@ -92,6 +92,7 @@ namespace js
         operator Array()    const { return std::get<Array>(var); }
 
         // Object value getters
+        String const& getString()               const { return std::get<String>(var); }
         Array const& getArray()                 const { return std::get<Array>(var); }
         Float32Array const& getFloat32Array()   const { return std::get<Float32Array>(var); }
         Object const& getObject()               const { return std::get<Object>(var); }
