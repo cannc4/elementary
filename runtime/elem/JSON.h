@@ -213,8 +213,9 @@ namespace js
 
             yyjson_write_err err;
             size_t len;
-            // Strings are sanitized in convertToYYJSON, so we can use default flags
-            char* json = yyjson_mut_write_opts(doc, YYJSON_WRITE_NOFLAG, NULL, &len, &err);
+            // INF_AND_NAN_AS_NULL writes non-finite numbers as null instead of
+            // erroring (matches the nlohmann fallback's behaviour).
+            char* json = yyjson_mut_write_opts(doc, YYJSON_WRITE_INF_AND_NAN_AS_NULL, NULL, &len, &err);
 
             if (!json)
             {
@@ -290,11 +291,12 @@ namespace js
         yyjson_mut_val* root = detail::convertToYYJSON(doc, v);
         yyjson_mut_doc_set_root(doc, root);
 
-        // Write to JSON string (minified, no extra whitespace)
-        // Strings are sanitized in convertToYYJSON, so we can use default flags
+        // Write to JSON string (minified, no extra whitespace).
+        // INF_AND_NAN_AS_NULL writes non-finite numbers as null instead of
+        // erroring (matches the nlohmann fallback's behaviour).
         yyjson_write_err err;
         size_t len;
-        char* json = yyjson_mut_write_opts(doc, YYJSON_WRITE_NOFLAG, NULL, &len, &err);
+        char* json = yyjson_mut_write_opts(doc, YYJSON_WRITE_INF_AND_NAN_AS_NULL, NULL, &len, &err);
 
         if (!json)
         {
