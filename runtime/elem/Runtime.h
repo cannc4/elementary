@@ -98,6 +98,15 @@ namespace elem
         // shared pointer to the resource.
         bool addSharedResource(std::string const& name, std::unique_ptr<SharedResource> resource);
 
+        // Loads an already-shared resource into the map, sharing ownership with
+        // the caller (and any other Runtime holding the same pointer).
+        //
+        // This is the zero-copy path for mirroring one runtime's resources into
+        // another: both maps then resolve the SAME object, so in-place content
+        // updates (e.g. AudioBufferResource::replace) are visible everywhere.
+        // Insert-only, like addSharedResource.
+        bool addSharedResourcePtr(std::string const& name, SharedResourcePtr resource);
+
         // Removes unused resources from the map
         //
         // This method will retain any resource with references held by an active
@@ -564,6 +573,12 @@ namespace elem
     //==============================================================================
     template <typename FloatType>
     bool Runtime<FloatType>::addSharedResource(std::string const& name, std::unique_ptr<SharedResource> resource)
+    {
+        return sharedResourceMap.add(name, std::move(resource));
+    }
+
+    template <typename FloatType>
+    bool Runtime<FloatType>::addSharedResourcePtr(std::string const& name, SharedResourcePtr resource)
     {
         return sharedResourceMap.add(name, std::move(resource));
     }
