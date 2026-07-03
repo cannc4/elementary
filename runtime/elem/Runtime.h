@@ -49,6 +49,13 @@ namespace elem
         // Apply graph rendering instructions
         int applyInstructions(js::Array const& batch);
 
+        // Detail of the most recent applyInstructions failure: the failing
+        // instruction's index, opcode, and payload (node ids in hex), plus the
+        // nodeTable size at failure time. Empty after a successful batch.
+        // Written on the thread that calls applyInstructions; read it
+        // immediately after a non-Ok return from the same thread.
+        std::string const& getLastApplyInstructionsError() const { return lastApplyError; }
+
         // Run the internal audio processing callback
         void process(
             const FloatType** inputChannelData,
@@ -139,6 +146,9 @@ namespace elem
         int appendChild(js::Value const& parentId, js::Value const& childId, js::Value const& childOutputChannel);
         int activateRoots(js::Array const& v);
 
+        std::string describeFailedInstruction(int rc, size_t index, size_t batchSize, js::Array const& ar);
+        std::string lastApplyError;
+
         BufferAllocator<FloatType> bufferAllocator;
         std::shared_ptr<GraphRenderSequence<FloatType>> rtRenderSeq;
         std::shared_ptr<GraphRenderSequence<FloatType>> buildRenderSequence();
@@ -186,17 +196,24 @@ namespace elem
     int Runtime<FloatType>::applyInstructions(elem::js::Array const& batch)
     {
         bool shouldRebuild = false;
+        lastApplyError.clear();
 
         // TODO: For correct transaction semantics here, we should createNode into a separate
         // map that only gets merged into the actual nodeMap on commitUpdaes
-        for (auto& next : batch) {
-            if (!next.isArray())
+        for (size_t i = 0; i < batch.size(); ++i) {
+            auto const& next = batch[i];
+
+            if (!next.isArray()) {
+                lastApplyError = "instruction " + std::to_string(i) + "/" + std::to_string(batch.size()) + " is not an array";
                 return ReturnCode::InvalidInstructionFormat();
+            }
 
             auto const& ar = next.getArray();
 
-            if(!ar[0].isNumber())
+            if (ar.empty() || !ar[0].isNumber()) {
+                lastApplyError = "instruction " + std::to_string(i) + "/" + std::to_string(batch.size()) + " has no numeric opcode";
                 return ReturnCode::InvalidInstructionFormat();
+            }
 
             auto const cmd = static_cast<InstructionType>(static_cast<int>((elem::js::Number) ar[0]));
             auto res = ReturnCode::Ok();
@@ -226,11 +243,62 @@ namespace elem
 
             // TODO: And here we should abort the transaction and revert any applied properties
             if (res != ReturnCode::Ok()) {
+                lastApplyError = describeFailedInstruction(res, i, batch.size(), ar);
                 return res;
             }
         }
 
         return ReturnCode::Ok();
+    }
+
+    template <typename FloatType>
+    std::string Runtime<FloatType>::describeFailedInstruction(int rc, size_t index, size_t batchSize, js::Array const& ar)
+    {
+        auto arg = [&ar](size_t i) -> js::Value {
+            return (i < ar.size()) ? ar[i] : js::Value();
+        };
+
+        auto idHex = [&arg](size_t i) -> std::string {
+            auto v = arg(i);
+            return v.isNumber() ? nodeIdToHex(static_cast<int32_t>((js::Number) v)) : (std::string) v.toString();
+        };
+
+        std::stringstream ss;
+        ss << ReturnCode::describe(rc) << " at instruction " << index << "/" << batchSize;
+
+        switch (static_cast<InstructionType>(static_cast<int>((js::Number) ar[0]))) {
+            case InstructionType::CREATE_NODE:
+                ss << ": createNode " << arg(2).toString() << "#" << idHex(1);
+                break;
+            case InstructionType::SET_PROPERTY:
+                ss << ": setProperty " << idHex(1) << " " << arg(2).toString() << " = " << arg(3).toString();
+                break;
+            case InstructionType::APPEND_CHILD:
+                ss << ": appendChild parent=" << idHex(1) << " child=" << idHex(2);
+                break;
+            case InstructionType::ACTIVATE_ROOTS: {
+                ss << ": activateRoots";
+                if (arg(1).isArray()) {
+                    auto const& roots = arg(1).getArray();
+                    ss << " (" << roots.size() << " roots; missing:";
+                    for (auto const& r : roots) {
+                        if (r.isNumber() && nodeTable.count(static_cast<int32_t>((js::Number) r)) == 0)
+                            ss << " " << nodeIdToHex(static_cast<int32_t>((js::Number) r));
+                    }
+                    ss << ")";
+                }
+                break;
+            }
+            case InstructionType::COMMIT_UPDATES:
+                ss << ": commitUpdates";
+                break;
+            default:
+                ss << ": opcode " << arg(0).toString();
+                break;
+        }
+
+        ss << " [nodeTable size=" << nodeTable.size() << "]";
+        return ss.str();
     }
 
     template <typename FloatType>
@@ -533,8 +601,8 @@ namespace elem
     {
         js::Object ret;
 
-        for (auto& [nodeId, node] : nodeTable) {
-            ret.insert({nodeIdToHex(nodeId), node->getProperties()});
+        for (auto& [nodeId, entry] : nodeTable) {
+            ret.insert({nodeIdToHex(nodeId), entry.node->getProperties()});
         }
 
         return ret;
