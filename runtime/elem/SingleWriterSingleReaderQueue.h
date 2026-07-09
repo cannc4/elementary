@@ -34,7 +34,11 @@ namespace elem
             auto const w = writePos.load();
             auto const r = readPos.load();
 
-            if (numFreeSlots(r, w) > 0)
+            // Keep one slot reserved: filling to exact capacity would advance
+            // writePos onto readPos, which numFullSlots reads as EMPTY — the
+            // whole backlog silently disappears. The vector overload below
+            // already guards this (els.size() >= numFreeSlots); mirror it here.
+            if (numFreeSlots(r, w) > 1)
             {
                 queue[w] = std::move(el);
                 auto const desiredWritePosition = (w + 1u) & indexMask;
