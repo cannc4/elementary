@@ -53,19 +53,22 @@ namespace elem
 
             // Unary math nodes
             callback("in",              GenericNodeFactory<IdentityNode<FloatType>>());
-            callback("sin",             GenericNodeFactory<UnaryOperationNode<FloatType, std::sin>>());
-            callback("cos",             GenericNodeFactory<UnaryOperationNode<FloatType, std::cos>>());
-            callback("tan",             GenericNodeFactory<UnaryOperationNode<FloatType, std::tan>>());
-            callback("tanh",            GenericNodeFactory<UnaryOperationNode<FloatType, std::tanh>>());
-            callback("asinh",           GenericNodeFactory<UnaryOperationNode<FloatType, std::asinh>>());
-            callback("ln",              GenericNodeFactory<UnaryOperationNode<FloatType, std::log>>());
-            callback("log",             GenericNodeFactory<UnaryOperationNode<FloatType, std::log10>>());
-            callback("log2",            GenericNodeFactory<UnaryOperationNode<FloatType, std::log2>>());
+            // libm-priced ops use the Expensive* variant: constant input across
+            // the block (param-derived curves — db2gain, tau2pole) collapses to
+            // one call + fill, bit-exact. Cheap/vectorizable ops stay plain.
+            callback("sin",             GenericNodeFactory<ExpensiveUnaryOperationNode<FloatType, std::sin>>());
+            callback("cos",             GenericNodeFactory<ExpensiveUnaryOperationNode<FloatType, std::cos>>());
+            callback("tan",             GenericNodeFactory<ExpensiveUnaryOperationNode<FloatType, std::tan>>());
+            callback("tanh",            GenericNodeFactory<ExpensiveUnaryOperationNode<FloatType, std::tanh>>());
+            callback("asinh",           GenericNodeFactory<ExpensiveUnaryOperationNode<FloatType, std::asinh>>());
+            callback("ln",              GenericNodeFactory<ExpensiveUnaryOperationNode<FloatType, std::log>>());
+            callback("log",             GenericNodeFactory<ExpensiveUnaryOperationNode<FloatType, std::log10>>());
+            callback("log2",            GenericNodeFactory<ExpensiveUnaryOperationNode<FloatType, std::log2>>());
             callback("ceil",            GenericNodeFactory<UnaryOperationNode<FloatType, std::ceil>>());
             callback("floor",           GenericNodeFactory<UnaryOperationNode<FloatType, std::floor>>());
             callback("round",           GenericNodeFactory<UnaryOperationNode<FloatType, std::round>>());
-            callback("sqrt",            GenericNodeFactory<UnaryOperationNode<FloatType, std::sqrt>>());
-            callback("exp",             GenericNodeFactory<UnaryOperationNode<FloatType, std::exp>>());
+            callback("sqrt",            GenericNodeFactory<ExpensiveUnaryOperationNode<FloatType, std::sqrt>>());
+            callback("exp",             GenericNodeFactory<ExpensiveUnaryOperationNode<FloatType, std::exp>>());
             callback("abs",             GenericNodeFactory<UnaryOperationNode<FloatType, std::abs>>());
 
             // Binary math nodes
@@ -73,7 +76,7 @@ namespace elem
             callback("leq",             GenericNodeFactory<BinaryOperationNode<FloatType, std::less_equal<FloatType>>>());
             callback("ge",              GenericNodeFactory<BinaryOperationNode<FloatType, std::greater<FloatType>>>());
             callback("geq",             GenericNodeFactory<BinaryOperationNode<FloatType, std::greater_equal<FloatType>>>());
-            callback("pow",             GenericNodeFactory<BinaryOperationNode<FloatType, SafePow<FloatType>>>());
+            callback("pow",             GenericNodeFactory<ExpensiveBinaryOperationNode<FloatType, SafePow<FloatType>>>());
             callback("eq",              GenericNodeFactory<BinaryOperationNode<FloatType, Eq<FloatType>>>());
             callback("and",             GenericNodeFactory<BinaryOperationNode<FloatType, BinaryAnd<FloatType>>>());
             callback("or",              GenericNodeFactory<BinaryOperationNode<FloatType, BinaryOr<FloatType>>>());

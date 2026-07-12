@@ -27,6 +27,46 @@ namespace elem
         }
     };
 
+    // Variant of UnaryOperationNode for expensive scalar ops (libm calls like
+    // exp/pow/log/tanh): when the input is constant across the block — the
+    // common case for parameter-derived curves like db2gain/tau2pole — the
+    // per-sample call collapses to one call + fill. Bit-exact: op is pure, so
+    // op(x0) is the value the loop would write to every sample. Audio-rate
+    // inputs bail out of the constness scan within a couple of samples.
+    template <typename FloatType, FloatType op(FloatType)>
+    struct ExpensiveUnaryOperationNode : public GraphNode<FloatType> {
+        using GraphNode<FloatType>::GraphNode;
+
+        void process (BlockContext<FloatType> const& ctx) override {
+            auto** inputData = ctx.inputData;
+            auto* outputData = ctx.outputData[0];
+            auto numChannels = ctx.numInputChannels;
+            auto numSamples = ctx.numSamples;
+
+            // If we don't have the inputs we need, we bail here and zero the buffer
+            // hoping to prevent unexpected signals.
+            if (numChannels < 1)
+                return (void) std::fill_n(outputData, numSamples, FloatType(0));
+
+            if (numSamples > 0) {
+                auto const* in = inputData[0];
+                auto const x0 = in[0];
+
+                bool constant = true;
+                for (size_t i = 1; i < numSamples; ++i) {
+                    if (in[i] != x0) { constant = false; break; }
+                }
+
+                if (constant)
+                    return (void) std::fill_n(outputData, numSamples, op(x0));
+            }
+
+            for (size_t i = 0; i < numSamples; ++i) {
+                outputData[i] = op(inputData[0][i]);
+            }
+        }
+    };
+
     template <typename FloatType, typename BinaryOp>
     struct BinaryOperationNode : public GraphNode<FloatType> {
         using GraphNode<FloatType>::GraphNode;
@@ -50,6 +90,47 @@ namespace elem
             // Then walk the second channel with the operator
             for (size_t i = 0; i < numSamples; ++i) {
                 outputData[i] = op(outputData[i], inputData[1][i]);
+            }
+        }
+
+        BinaryOp op;
+    };
+
+    // BinaryOperationNode counterpart of ExpensiveUnaryOperationNode — used
+    // only for libm-priced ops (pow). Both inputs constant across the block
+    // (db2gain: pow(10, db/20) on a settled fader) → one call + fill, bit-exact.
+    template <typename FloatType, typename BinaryOp>
+    struct ExpensiveBinaryOperationNode : public GraphNode<FloatType> {
+        using GraphNode<FloatType>::GraphNode;
+
+        void process (BlockContext<FloatType> const& ctx) override {
+            auto** inputData = ctx.inputData;
+            auto* outputData = ctx.outputData[0];
+            auto numChannels = ctx.numInputChannels;
+            auto numSamples = ctx.numSamples;
+
+            // If we don't have the inputs we need, we bail here and zero the buffer
+            // hoping to prevent unexpected signals.
+            if (numChannels < 2)
+                return (void) std::fill_n(outputData, numSamples, FloatType(0));
+
+            if (numSamples > 0) {
+                auto const* a = inputData[0];
+                auto const* b = inputData[1];
+                auto const a0 = a[0];
+                auto const b0 = b[0];
+
+                bool constant = true;
+                for (size_t i = 1; i < numSamples; ++i) {
+                    if (a[i] != a0 || b[i] != b0) { constant = false; break; }
+                }
+
+                if (constant)
+                    return (void) std::fill_n(outputData, numSamples, op(a0, b0));
+            }
+
+            for (size_t i = 0; i < numSamples; ++i) {
+                outputData[i] = op(inputData[0][i], inputData[1][i]);
             }
         }
 
