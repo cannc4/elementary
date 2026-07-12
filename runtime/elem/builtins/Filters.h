@@ -25,10 +25,33 @@ namespace elem
             if (numChannels < 2)
                 return (void) std::fill_n(outputData, numSamples, FloatType(0));
 
+            if (numSamples == 0)
+                return;
+
+            auto const* pIn = inputData[0];
+            auto const* xIn = inputData[1];
+
+            // Settled fast path: when p and x are constant across the block and z
+            // already sits at the recurrence's float fixed point (x + p*z == z),
+            // every output sample equals z bit-exactly — fill and skip the loop.
+            // The serial dependency below can't vectorize, and parameter smoothers
+            // (el.smooth) built on this node are settled nearly all the time.
+            auto const p0 = pIn[0];
+            auto const x0 = xIn[0];
+
+            if (x0 + p0 * z == z) {
+                bool constant = true;
+                for (size_t i = 1; i < numSamples; ++i) {
+                    if (pIn[i] != p0 || xIn[i] != x0) { constant = false; break; }
+                }
+                if (constant)
+                    return (void) std::fill_n(outputData, numSamples, z);
+            }
+
             // First channel is the pole position, second channel is the input signal
             for (size_t i = 0; i < numSamples; ++i) {
-                auto const p = inputData[0][i];
-                auto const x = inputData[1][i];
+                auto const p = pIn[i];
+                auto const x = xIn[i];
 
                 z = x + p * z;
                 outputData[i] = z;
