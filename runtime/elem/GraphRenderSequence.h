@@ -9,6 +9,10 @@
 #include "FloatBufferPool.h"
 #include "Types.h"
 
+#if defined(ELEM_RUNTIME_TRACE_HEADER)
+#include ELEM_RUNTIME_TRACE_HEADER
+#endif
+
 
 namespace elem
 {
@@ -168,7 +172,7 @@ namespace elem
             }
         }
 
-        void process(BlockContext<FloatType> const& hostCtx)
+        void process(BlockContext<FloatType> const& hostCtx, bool processBlockEvents)
         {
             size_t const outChan = rootPtr->getChannelNumber();
 
@@ -192,8 +196,30 @@ namespace elem
             needsReset = true;
 
             // Run the subsequence
+            if (!processBlockEvents) {
+                aggregateEvents.clear();
+            }
             for (size_t i = 0; i < renderOps.size(); ++i) {
                 auto& op = renderOps[i];
+
+                if (!processBlockEvents) {
+                    op.outputEvents->clear();
+                    op.node->process(BlockContext<FloatType> {
+                        op.hasInlets
+                            ? const_cast<const FloatType**>(op.inputChannels.data())
+                            : hostCtx.inputData,
+                        op.hasInlets ? op.inputChannels.size() : hostCtx.numInputChannels,
+                        op.outputChannels.data(),
+                        op.outputChannels.size(),
+                        hostCtx.numSamples,
+                        hostCtx.userData,
+                        rootPtr->active(),
+                        aggregateEvents,
+                        *op.outputEvents,
+                    });
+                    continue;
+                }
+
                 op.outputEvents->clear();
 
                 if (op.hasInlets) {
@@ -239,6 +265,13 @@ namespace elem
             }
         }
 
+#if defined(ELEM_TRACE_GRAPH_PROCESS)
+        size_t getRenderOpCount() const noexcept
+        {
+            return renderOps.size();
+        }
+#endif
+
     private:
         std::shared_ptr<RootNode<FloatType>> rootPtr;
         std::vector<std::shared_ptr<GraphNode<FloatType>>> nodeList;
@@ -274,10 +307,16 @@ namespace elem
             subseqs.clear();
             bufferPool.clear();
             eventsBufferPool.clear();
+#if defined(ELEM_TRACE_GRAPH_PROCESS)
+            traceRenderOpCount = 0;
+#endif
         }
 
         void push(RootRenderSequence<FloatType>&& sq)
         {
+#if defined(ELEM_TRACE_GRAPH_PROCESS)
+            traceRenderOpCount += sq.getRenderOpCount();
+#endif
             subseqs.push_back(std::move(sq));
         }
 
@@ -288,8 +327,12 @@ namespace elem
             });
         }
 
-        void process(BlockContext<FloatType> const& hostCtx)
+        void process(BlockContext<FloatType> const& hostCtx, bool processBlockEvents = true)
         {
+#if defined(ELEM_TRACE_GRAPH_PROCESS)
+            ELEM_TRACE_GRAPH_PROCESS(processBlockEvents, subseqs.size(),
+                                     traceRenderOpCount, hostCtx.numSamples);
+#endif
             // Clear the output channels
             for (size_t i = 0; i < hostCtx.numOutputChannels; ++i) {
                 for (size_t j = 0; j < hostCtx.numSamples; ++j) {
@@ -299,7 +342,7 @@ namespace elem
 
             // Process subsequences
             for (auto& sq : subseqs) {
-                sq.process(hostCtx);
+                sq.process(hostCtx, processBlockEvents);
             }
 
             // Promote tap buffers.
@@ -321,6 +364,9 @@ namespace elem
 
     private:
         std::vector<RootRenderSequence<FloatType>> subseqs;
+#if defined(ELEM_TRACE_GRAPH_PROCESS)
+        size_t traceRenderOpCount { 0 };
+#endif
     };
 
 } // namespace elem

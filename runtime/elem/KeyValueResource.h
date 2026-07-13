@@ -39,6 +39,10 @@ namespace elem {
             return version_.load(std::memory_order_acquire);
         }
 
+        uint64_t identity() const noexcept {
+            return identity_;
+        }
+
         elem::js::Value get(std::string const& key) const {
             auto snap = snapshot();
             auto it = snap->find(key);
@@ -47,6 +51,8 @@ namespace elem {
         }
 
     private:
+        inline static std::atomic<uint64_t> nextIdentity_{1};
+        const uint64_t identity_{nextIdentity_.fetch_add(1, std::memory_order_relaxed)};
         std::shared_ptr<MapType> current;
         std::atomic<uint64_t> version_{0};
     };

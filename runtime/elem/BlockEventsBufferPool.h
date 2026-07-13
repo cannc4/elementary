@@ -135,9 +135,9 @@ inline BlockEvents& BlockEventsBufferPool::getEventsBuffer() {
         return m_memoryPool.allocate<BlockEvents>();
     }
 
-    auto& b = m_freeList.top();
+    auto b = m_freeList.top();
     m_freeList.pop();
-    return b;
+    return b.get();
 }
 
 } // namespace elem

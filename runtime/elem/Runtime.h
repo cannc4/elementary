@@ -45,6 +45,14 @@ namespace elem
         //==============================================================================
         Runtime(double sampleRate, int blockSize);
 
+        // Disable graph-level BlockEvents routing for hosts whose node graph never
+        // consumes or emits those events. Configure this before the runtime begins
+        // processing; the default remains enabled for Elementary compatibility.
+        void setBlockEventProcessingEnabled(bool enabled) noexcept
+        {
+            blockEventProcessingEnabled = enabled;
+        }
+
         //==============================================================================
         // Apply graph rendering instructions
         int applyInstructions(js::Array const& batch);
@@ -183,6 +191,7 @@ namespace elem
 
         double sampleRate;
         int blockSize;
+        bool blockEventProcessingEnabled { true };
 
     };
 
@@ -397,7 +406,7 @@ namespace elem
         }
 
         if (rtRenderSeq) {
-            rtRenderSeq->process(ctx);
+            rtRenderSeq->process(ctx, blockEventProcessingEnabled);
         }
     }
 
