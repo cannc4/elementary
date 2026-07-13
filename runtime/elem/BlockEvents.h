@@ -1,6 +1,11 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+#include <new>
+#include <type_traits>
 #include <typeindex>
+#include <utility>
 
 #include "third-party/choc/choc/containers/choc_SmallVector.h"
 #include "third-party/choc/choc/audio/choc_MIDI.h"
@@ -32,25 +37,30 @@ struct BlockEvent {
     size_t time;
 
     static constexpr size_t kMaxObjectSize = 64;
-    alignas(std::max_align_t) std::byte data[kMaxObjectSize];
+    // choc::SmallVector's inline storage is backed by uint64_t[]. Keep the
+    // erased payload within that actual alignment guarantee; accepting a more
+    // strictly aligned event would make every inline BlockEvent object UB.
+    static constexpr size_t kPayloadAlignment = alignof(uint64_t);
+    alignas(kPayloadAlignment) std::byte data[kMaxObjectSize];
     std::type_index typeIndex;
 
     template <typename T>
     BlockEvent(size_t t, T&& d)
         : time(t)
-        , typeIndex(std::type_index(typeid(T)))
+        , typeIndex(std::type_index(typeid(std::remove_cvref_t<T>)))
     {
-        static_assert(sizeof(T) <= kMaxObjectSize, "Type too large for BlockEvent buffer");
-        static_assert(alignof(T) <= alignof(std::max_align_t), "Type alignment too strict");
-        static_assert(std::is_trivially_copyable_v<T>, "Type must be trivially copyable");
+        using EventType = std::remove_cvref_t<T>;
+        static_assert(sizeof(EventType) <= kMaxObjectSize, "Type too large for BlockEvent buffer");
+        static_assert(alignof(EventType) <= kPayloadAlignment, "Type alignment too strict");
+        static_assert(std::is_trivially_copyable_v<EventType>, "Type must be trivially copyable");
 
-        new(data) T(std::forward<T>(d));
+        ::new (static_cast<void*>(data)) EventType(std::forward<T>(d));
     }
 
     template <typename T>
     T* get_if() {
-        if (std::type_index(typeid(T)) == typeIndex) {
-            return reinterpret_cast<T*>(&data);
+        if (std::type_index(typeid(std::remove_cv_t<T>)) == typeIndex) {
+            return std::launder(reinterpret_cast<T*>(data));
         }
 
         return nullptr;
@@ -58,8 +68,8 @@ struct BlockEvent {
 
     template <typename T>
     T const* get_if() const {
-        if (std::type_index(typeid(T)) == typeIndex) {
-            return reinterpret_cast<T const*>(&data);
+        if (std::type_index(typeid(std::remove_cv_t<T>)) == typeIndex) {
+            return std::launder(reinterpret_cast<T const*>(data));
         }
 
         return nullptr;
@@ -69,6 +79,9 @@ struct BlockEvent {
         return time > other.time;
     }
 };
+
+static_assert(alignof(BlockEvent) <= alignof(uint64_t),
+              "BlockEvent must fit choc::SmallVector's inline-storage alignment");
 
 // A buffer of realtime BlockEvent instances
 //
