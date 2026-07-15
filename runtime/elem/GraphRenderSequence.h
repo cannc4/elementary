@@ -88,21 +88,10 @@ namespace elem
     class RootRenderSequence
     {
     public:
-        // Channel-table padding width. Matches ChannelData's inline capacity: a
-        // node that indexes ctx.inputData/outputData past its provisioned count
-        // (fixed stereo/multi-input assumptions) must land in valid scratch
-        // memory, not in whatever bytes follow the pointer table. This happens
-        // in the field when a failed applyInstructions batch (non-transactional)
-        // leaves a node with fewer edges than its type expects.
-        static constexpr size_t kPaddedChannels = 16;
-
-        RootRenderSequence(FloatBufferPool<FloatType>& pool, BlockEventsBufferPool& eventsPool, std::shared_ptr<RootNode<FloatType>>& root,
-                           FloatType* zeroScratch, FloatType* sinkScratch)
+        RootRenderSequence(FloatBufferPool<FloatType>& pool, BlockEventsBufferPool& eventsPool, std::shared_ptr<RootNode<FloatType>>& root)
             : rootPtr(root)
             , m_bufferPool(pool)
             , m_eventsBufferPool(eventsPool)
-            , m_zeroScratch(zeroScratch)
-            , m_sinkScratch(sinkScratch)
         {}
 
         void push(std::shared_ptr<GraphNode<FloatType>>& node, std::vector<OutletConnection> const& outlets)
@@ -116,18 +105,13 @@ namespace elem
             auto outputChannels = m_bufferPool.produce(node->getId(), outlets);
             auto& outputEvents = m_eventsBufferPool.produce(node->getId(), outlets);
 
-            auto const numOuts = outputChannels.size();
-            padChannels(outputChannels, m_sinkScratch);
-
             renderOps.push_back(RenderOp {
                 node.get(),
                 std::move(outputChannels),
                 {},
                 &outputEvents,
                 {},
-                false,
-                numOuts,
-                0
+                false
             });
         }
 
@@ -151,20 +135,13 @@ namespace elem
             auto& outputEvents = m_eventsBufferPool.produce(node->getId(), outlets);
             auto inputEvents = m_eventsBufferPool.consume(inlets);
 
-            auto const numOuts = outputChannels.size();
-            auto const numIns = inputChannels.size();
-            padChannels(outputChannels, m_sinkScratch);
-            padChannels(inputChannels, m_zeroScratch);
-
             renderOps.push_back(RenderOp {
                 node.get(),
                 std::move(outputChannels),
                 std::move(inputChannels),
                 &outputEvents,
                 std::move(inputEvents),
-                true,
-                numOuts,
-                numIns
+                true
             });
         }
 
@@ -214,16 +191,7 @@ namespace elem
 
             needsReset = true;
 
-            // Run the subsequence.
-            //
-            // Channel tables were padded to kPaddedChannels at BUILD time (see
-            // padChannels in push()) while the BlockContext carries the REAL
-            // counts (op.numOuts/numIns) — well-behaved nodes are unaffected
-            // and this loop is identical to the unpadded original (zero
-            // per-block overhead); a node whose fixed-index channel
-            // assumptions exceed its provisioned edges reads the shared zero
-            // buffer / writes the shared sink buffer instead of dereferencing
-            // whatever bytes follow the pointer table.
+            // Run the subsequence
             for (size_t i = 0; i < renderOps.size(); ++i) {
                 auto& op = renderOps[i];
                 op.outputEvents->clear();
@@ -239,9 +207,9 @@ namespace elem
 
                     op.node->process(BlockContext<FloatType> {
                         const_cast<const FloatType**>(op.inputChannels.data()),
-                        op.numIns,
+                        op.inputChannels.size(),
                         op.outputChannels.data(),
-                        op.numOuts,
+                        op.outputChannels.size(),
                         hostCtx.numSamples,
                         hostCtx.userData,
                         rootPtr->active(),
@@ -253,7 +221,7 @@ namespace elem
                         hostCtx.inputData,
                         hostCtx.numInputChannels,
                         op.outputChannels.data(),
-                        op.numOuts,
+                        op.outputChannels.size(),
                         hostCtx.numSamples,
                         hostCtx.userData,
                         rootPtr->active(),
@@ -272,26 +240,11 @@ namespace elem
         }
 
     private:
-        // Build-time padding: fill the table's unused slots up to
-        // kPaddedChannels with the given scratch buffer. Runs once per node on
-        // the graph-build (message) thread; the audio thread sees a fully
-        // valid 16-deep pointer table at zero per-block cost. kPaddedChannels
-        // equals ChannelData's inline capacity, so the pads never heap-allocate.
-        static void padChannels(ChannelData<FloatType>& channels, FloatType* scratch)
-        {
-            if (scratch == nullptr)
-                return;
-            while (channels.size() < kPaddedChannels)
-                channels.push_back(scratch);
-        }
-
         std::shared_ptr<RootNode<FloatType>> rootPtr;
         std::vector<std::shared_ptr<GraphNode<FloatType>>> nodeList;
         std::vector<std::shared_ptr<TapOutNode<FloatType>>> tapList;
         FloatBufferPool<FloatType>& m_bufferPool;
         BlockEventsBufferPool& m_eventsBufferPool;
-        FloatType* m_zeroScratch = nullptr;  // owned by GraphRenderSequence; read-only silent input padding
-        FloatType* m_sinkScratch = nullptr;  // owned by GraphRenderSequence; write sink for over-indexed outputs
 
         struct RenderOp {
             GraphNode<FloatType>* node;
@@ -300,10 +253,6 @@ namespace elem
             BlockEvents* outputEvents;
             choc::SmallVector<choc::ObjectPointer<BlockEvents>, 16> inputEvents;
             bool hasInlets;
-            // Real provisioned counts — the channel vectors above are padded
-            // to kPaddedChannels, so .size() no longer reflects them.
-            size_t numOuts;
-            size_t numIns;
         };
         std::vector<RenderOp> renderOps;
 
@@ -317,8 +266,6 @@ namespace elem
     public:
         GraphRenderSequence(size_t blockSize)
         : bufferPool(blockSize)
-        , zeroScratch(blockSize, FloatType(0))
-        , sinkScratch(blockSize, FloatType(0))
         {
         }
 
@@ -371,13 +318,6 @@ namespace elem
 
         FloatBufferPool<FloatType> bufferPool;
         BlockEventsBufferPool eventsBufferPool;
-
-        // Shared padding buffers for RootRenderSequence's channel tables (see
-        // kPaddedChannels). zeroScratch must stay silent — nodes only read it;
-        // sinkScratch absorbs writes from over-indexed outputs. Sized to the
-        // runtime block size (numSamples never exceeds it).
-        std::vector<FloatType> zeroScratch;
-        std::vector<FloatType> sinkScratch;
 
     private:
         std::vector<RootRenderSequence<FloatType>> subseqs;

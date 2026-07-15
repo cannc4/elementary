@@ -686,8 +686,7 @@ namespace elem
         }
 
         for (auto& ptr : sortedRoots) {
-            RootRenderSequence<FloatType> rrs(rseq->bufferPool, rseq->eventsBufferPool, ptr,
-                                              rseq->zeroScratch.data(), rseq->sinkScratch.data());
+            RootRenderSequence<FloatType> rrs(rseq->bufferPool, rseq->eventsBufferPool, ptr);
 
             std::vector<NodeId> visitOrder;
             traverse(visited, visitOrder, ptr->getId());
