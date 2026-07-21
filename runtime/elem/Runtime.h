@@ -56,6 +56,28 @@ namespace elem
         // immediately after a non-Ok return from the same thread.
         std::string const& getLastApplyInstructionsError() const { return lastApplyError; }
 
+        // Retry a render sequence whose rseqQueue push failed (the audio thread
+        // stopped draining — device suspended, host bypass/freeze). Without the
+        // retry the drop is SILENT: nodeTable and every JS-side cache read
+        // "current" while the audio thread keeps the old graph until some later
+        // rebuild happens to land. Newest-wins — only the latest built sequence
+        // is parked. Returns true when nothing remains pending. Must be called
+        // from the applyInstructions (writer) thread only; applyInstructions
+        // retries internally, and hosts should also poll from their timer so a
+        // parked sequence lands once the audio thread resumes draining.
+        bool tryFlushPendingRenderSequence()
+        {
+            if (pendingRenderSeq == nullptr)
+                return true;
+            auto copy = pendingRenderSeq;
+            if (rseqQueue.push(std::move(copy)))
+            {
+                pendingRenderSeq = nullptr;
+                return true;
+            }
+            return false;
+        }
+
         // Run the internal audio processing callback
         void process(
             const FloatType** inputChannelData,
@@ -165,6 +187,10 @@ namespace elem
 
         SingleWriterSingleReaderQueue<std::shared_ptr<GraphRenderSequence<FloatType>>> rseqQueue;
 
+        // The newest render sequence whose queue push failed (writer thread
+        // only). Retried by tryFlushPendingRenderSequence.
+        std::shared_ptr<GraphRenderSequence<FloatType>> pendingRenderSeq;
+
         //==============================================================================
         std::unordered_map<std::string, NodeFactoryFn> nodeFactory;
 
@@ -207,6 +233,10 @@ namespace elem
         bool shouldRebuild = false;
         lastApplyError.clear();
 
+        // A parked sequence from an earlier full-queue commit gets first shot
+        // at the freed slots; a rebuild in THIS batch supersedes it below.
+        tryFlushPendingRenderSequence();
+
         // TODO: For correct transaction semantics here, we should createNode into a separate
         // map that only gets merged into the actual nodeMap on commitUpdaes
         for (size_t i = 0; i < batch.size(); ++i) {
@@ -243,7 +273,11 @@ namespace elem
                     break;
                 case InstructionType::COMMIT_UPDATES:
                     if (shouldRebuild) {
-                        rseqQueue.push(buildRenderSequence());
+                        // Newest-wins: this build supersedes any parked sequence.
+                        // A failed push (audio thread not draining) parks it for
+                        // retry instead of silently dropping the new topology.
+                        pendingRenderSeq = buildRenderSequence();
+                        tryFlushPendingRenderSequence();
                     }
                     break;
                 default:
