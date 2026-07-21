@@ -237,6 +237,15 @@ namespace elem
         // at the freed slots; a rebuild in THIS batch supersedes it below.
         tryFlushPendingRenderSequence();
 
+        // Node ids are content hashes (kind + props key + children), so a
+        // CREATE_NODE for an id already in the nodeTable is a REPLAY of the
+        // identical node — the frontend's renderer cache reset while this
+        // nodeTable survived. Aborting the batch there desyncs the graph
+        // permanently; instead the create is a no-op and the node's
+        // APPEND_CHILD replays are skipped (its child list is already exactly
+        // right; re-appending would double-connect the graph).
+        std::set<int32_t> replayedNodeIds;
+
         // TODO: For correct transaction semantics here, we should createNode into a separate
         // map that only gets merged into the actual nodeMap on commitUpdaes
         for (size_t i = 0; i < batch.size(); ++i) {
@@ -260,11 +269,18 @@ namespace elem
             switch (cmd) {
                 case InstructionType::CREATE_NODE:
                     res = createNode(ar[1], ar[2]);
+                    if (res == ReturnCode::NodeAlreadyExists() && ar.size() > 1 && ar[1].isNumber()) {
+                        replayedNodeIds.insert(static_cast<int32_t>((js::Number) ar[1]));
+                        res = ReturnCode::Ok();
+                    }
                     break;
                 case InstructionType::SET_PROPERTY:
                     res = setProperty(ar[1], ar[2], ar[3]);
                     break;
                 case InstructionType::APPEND_CHILD:
+                    if (ar.size() > 1 && ar[1].isNumber()
+                        && replayedNodeIds.count(static_cast<int32_t>((js::Number) ar[1])) > 0)
+                        break;  // replayed parent: child list already in place
                     res = appendChild(ar[1], ar[2], ar[3]);
                     break;
                 case InstructionType::ACTIVATE_ROOTS:
